@@ -1,0 +1,33 @@
+# Data Collection
+instaloader
+selenium
+google-cloud-vision
+playwright
+pytesseract
+
+# NLP & Analysis
+transformers
+torch
+pandas
+numpy
+matplotlib
+seaborn
+
+# Brand Matching
+langchain
+faiss-cpu
+scikit-learn
+tensorflow
+
+# Web Dashboard
+streamlit
+flask
+
+# Database
+psycopg2-binary
+firebase-admin
+
+# Utils
+python-dotenv
+requests
+beautifulsoup4
