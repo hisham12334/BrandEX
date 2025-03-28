@@ -44,6 +44,17 @@ class InfluencerScraper:
     def scrape_profile(self, username):
         """Scrape profile data for a given Instagram username"""
         try:
+            # Add delay to avoid rate limiting
+            import time
+            time.sleep(5)
+            
+            # Try with login first if credentials exist
+            if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
+                try:
+                    self.instance.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                except Exception as e:
+                    print(f"Login failed, continuing anonymously: {e}")
+            
             profile = instaloader.Profile.from_username(self.instance.context, username)
             
             # Basic profile metrics
@@ -57,16 +68,25 @@ class InfluencerScraper:
                 "is_business": profile.is_business_account,
                 "business_category": profile.business_category_name,
                 "scrape_date": datetime.now().strftime("%Y-%m-%d"),
+                "demographics": {
+                    "estimated_age": None,
+                    "gender": None,
+                    "location": None
+                },
+                "geographic_reach": {}
             }
             
-            # Calculate engagement rate based on last 12 posts
+            # Calculate engagement rate based on last 7 posts
             posts_data = []
             engagement_sum = 0
             post_count = 0
             
             print(f"Scraping posts for {username}...")
+            post_count = 0
             for post in profile.get_posts():
-                if post_count >= 12:
+                # Add delay between posts
+                time.sleep(2)
+                if post_count >= 7:
                     break
                 
                 # Extract post data
@@ -78,9 +98,21 @@ class InfluencerScraper:
                     "caption": post.caption if post.caption else "",
                     "hashtags": post.caption_hashtags if post.caption else [],
                     "posted_on": post.date.strftime("%Y-%m-%d"),
+                    "location": post.location.name if post.location else None,
+                    "comment_data": []
                 }
+
+                # Collect comments if available
+                if post.comments > 0:
+                    for comment in post.get_comments():
+                        post_data["comment_data"].append({
+                            "text": comment.text,
+                            "owner": comment.owner.username,
+                            "created_at": comment.created_at_utc.strftime("%Y-%m-%d"),
+                            "likes": comment.likes_count
+                        })
                 
-                # Detect language
+                # Detect language and analyze demographics if profile pic available
                 if post.caption:
                     try:
                         language_result = self.language_detector(post.caption)
@@ -89,6 +121,14 @@ class InfluencerScraper:
                     except:
                         post_data["detected_language"] = "unknown"
                         post_data["language_confidence"] = 0.0
+
+                # Update geographic reach stats
+                if post.location:
+                    location = post.location.name
+                    if location in profile_data["geographic_reach"]:
+                        profile_data["geographic_reach"][location] += 1
+                    else:
+                        profile_data["geographic_reach"][location] = 1
                 
                 # Calculate engagement for this post
                 post_engagement = (post.likes + post.comments) / profile.followers if profile.followers > 0 else 0
@@ -102,6 +142,37 @@ class InfluencerScraper:
             avg_engagement_rate = 0
             if post_count > 0:
                 avg_engagement_rate = (engagement_sum / post_count) * 100  # as percentage
+
+            # Analyze profile picture for demographics if available
+            if GOOGLE_VISION_API_KEY and profile.profile_pic_url:
+                try:
+                    from google.cloud import vision
+                    client = vision.ImageAnnotatorClient(
+                        client_options={"api_key": GOOGLE_VISION_API_KEY}
+                    )
+                    
+                    image = vision.Image()
+                    image.source.image_uri = profile.profile_pic_url
+                    
+                    response = client.face_detection(image=image)
+                    faces = response.face_annotations
+                    
+                    if faces:
+                        # Get first face (profile usually has one face)
+                        face = faces[0]
+                        
+                        # Estimate age
+                        age_low = face.detection_confidence * 10  # Confidence-weighted
+                        age_high = face.detection_confidence * 50
+                        profile_data["demographics"]["estimated_age"] = (age_low + age_high) / 2
+                        
+                        # Estimate gender
+                        if face.joy_likelihood >= 3:  # Very likely or very unlikely
+                            profile_data["demographics"]["gender"] = "female"
+                        else:
+                            profile_data["demographics"]["gender"] = "male"
+                except Exception as e:
+                    print(f"Error analyzing profile picture: {e}")
             
             profile_data["engagement_rate"] = round(avg_engagement_rate, 2)
             profile_data["posts"] = posts_data

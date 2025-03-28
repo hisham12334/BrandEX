@@ -91,9 +91,16 @@ class InfluencerAnalyzer:
                 "posts_count": data["posts_count"],
                 "engagement_rate": data["engagement_rate"]
             },
+            "demographics": data.get("demographics", {}),
+            "geographic_reach": data.get("geographic_reach", {}),
             "content_analysis": {
                 "categories": {},
                 "sentiment": {
+                    "positive": 0,
+                    "neutral": 0,
+                    "negative": 0
+                },
+                "comment_sentiment": {
                     "positive": 0,
                     "neutral": 0,
                     "negative": 0
@@ -103,7 +110,7 @@ class InfluencerAnalyzer:
             "language_distribution": {}
         }
         
-        # Analyze posts
+        # Analyze posts and comments
         posts_df = pd.DataFrame(data["posts"])
         
         if len(posts_df) == 0:
@@ -118,7 +125,7 @@ class InfluencerAnalyzer:
             if not caption or len(caption.strip()) == 0:
                 continue
             
-            # Analyze sentiment
+            # Analyze post sentiment
             sentiment = self.analyze_sentiment(caption)
             sentiment_label = sentiment["label"]
             
@@ -131,6 +138,23 @@ class InfluencerAnalyzer:
                 sentiment_category = "neutral"
             
             analysis["content_analysis"]["sentiment"][sentiment_category] += 1
+            
+            # Analyze comment sentiment if available
+            if "comment_data" in post and post["comment_data"]:
+                for comment in post["comment_data"]:
+                    comment_text = comment.get("text", "")
+                    if comment_text:
+                        comment_sentiment = self.analyze_sentiment(comment_text)
+                        comment_label = comment_sentiment["label"]
+                        
+                        if "positive" in comment_label or int(comment_label[0]) >= 4:
+                            comment_category = "positive"
+                        elif "negative" in comment_label or int(comment_label[0]) <= 2:
+                            comment_category = "negative"
+                        else:
+                            comment_category = "neutral"
+                        
+                        analysis["content_analysis"]["comment_sentiment"][comment_category] += 1
             
             # Categorize post
             category = self.categorize_post(caption)
@@ -195,6 +219,14 @@ class InfluencerAnalyzer:
         viz_dir = os.path.join(self.data_dir, f"{username}_visualizations")
         if not os.path.exists(viz_dir):
             os.makedirs(viz_dir)
+            
+        # Calculate comment sentiment percentages
+        total_comments = sum(analysis["content_analysis"]["comment_sentiment"].values())
+        if total_comments > 0:
+            comment_sentiment = {
+                k: (v / total_comments * 100)
+                for k, v in analysis["content_analysis"]["comment_sentiment"].items()
+            }
         
         # Set plotting style
         plt.style.use('ggplot')
@@ -213,7 +245,8 @@ class InfluencerAnalyzer:
             plt.savefig(os.path.join(viz_dir, "category_distribution.png"))
             plt.close()
         
-        # 2. Sentiment Analysis Pie Chart
+        # 2. Sentiment Analysis Pie Charts
+        # Post sentiment
         plt.figure(figsize=(10, 6))
         sentiment = analysis["content_analysis"]["sentiment"]
         labels = list(sentiment.keys())
@@ -221,12 +254,26 @@ class InfluencerAnalyzer:
         colors = ['green', 'gray', 'red']
         plt.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
         plt.axis('equal')
-        plt.title(f'Content Sentiment Distribution for @{username}')
+        plt.title(f'Post Sentiment Distribution for @{username}')
         plt.tight_layout()
-        plt.savefig(os.path.join(viz_dir, "sentiment_distribution.png"))
+        plt.savefig(os.path.join(viz_dir, "post_sentiment.png"))
         plt.close()
         
-        # 3. Language Distribution Bar Chart
+        # Comment sentiment (if available)
+        if total_comments > 0:
+            plt.figure(figsize=(10, 6))
+            labels = list(comment_sentiment.keys())
+            sizes = list(comment_sentiment.values())
+            colors = ['green', 'gray', 'red']
+            plt.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+            plt.axis('equal')
+            plt.title(f'Comment Sentiment Distribution for @{username}')
+            plt.tight_layout()
+            plt.savefig(os.path.join(viz_dir, "comment_sentiment.png"))
+            plt.close()
+        
+        # 3. Language and Geographic Distribution Charts
+        # Language distribution
         if analysis["language_distribution"]:
             plt.figure(figsize=(10, 6))
             languages = analysis["language_distribution"]
@@ -245,6 +292,27 @@ class InfluencerAnalyzer:
             plt.xticks(rotation=45)
             plt.tight_layout()
             plt.savefig(os.path.join(viz_dir, "language_distribution.png"))
+            plt.close()
+            
+        # Geographic reach
+        if analysis["geographic_reach"]:
+            plt.figure(figsize=(12, 6))
+            locations = analysis["geographic_reach"]
+            locs = list(locations.keys())
+            counts = list(locations.values())
+            
+            # Sort by count (descending)
+            sorted_indices = np.argsort(counts)[::-1]
+            locs = [locs[i] for i in sorted_indices]
+            counts = [counts[i] for i in sorted_indices]
+            
+            plt.bar(locs, counts)
+            plt.xlabel('Location')
+            plt.ylabel('Post Count')
+            plt.title(f'Geographic Reach for @{username}')
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            plt.savefig(os.path.join(viz_dir, "geographic_reach.png"))
             plt.close()
         
         # 4. Engagement Rate Trend Line
@@ -302,6 +370,14 @@ class InfluencerAnalyzer:
         viz_dir = os.path.join(self.data_dir, f"{username}_visualizations")
         if not os.path.exists(viz_dir):
             self.generate_visualizations(username)
+            
+        # Calculate comment sentiment percentages
+        total_comments = sum(analysis["content_analysis"]["comment_sentiment"].values())
+        if total_comments > 0:
+            comment_sentiment = {
+                k: (v / total_comments * 100)
+                for k, v in analysis["content_analysis"]["comment_sentiment"].items()
+            }
         
         # Generate report
         report = f"""# Influencer Analysis Report: @{username}
@@ -311,6 +387,10 @@ class InfluencerAnalyzer:
 - **Following:** {analysis["basic_metrics"]["following"]:,}
 - **Posts Count:** {analysis["basic_metrics"]["posts_count"]:,}
 - **Average Engagement Rate:** {analysis["basic_metrics"]["engagement_rate"]}%
+
+## Demographics
+- **Estimated Age:** {analysis["demographics"].get("estimated_age", "N/A")}
+- **Gender:** {analysis["demographics"].get("gender", "N/A")}
 
 ## Content Analysis
 
@@ -330,25 +410,46 @@ class InfluencerAnalyzer:
         report += """
 ### Content Sentiment
 """
+        # Post sentiment
         sentiment = analysis["content_analysis"]["sentiment"]
         total_sentiment = sum(sentiment.values())
         if total_sentiment > 0:
+            report += "\n#### Post Sentiment\n"
             for label, count in sentiment.items():
                 percentage = count / total_sentiment * 100
                 report += f"- **{label.capitalize()}:** {percentage:.1f}%\n"
         else:
-            report += "- No sentiment data available\n"
+            report += "- No post sentiment data available\n"
+            
+        # Comment sentiment
+        if total_comments > 0:
+            report += "\n#### Comment Sentiment\n"
+            for label, percentage in comment_sentiment.items():
+                report += f"- **{label.capitalize()}:** {percentage:.1f}%\n"
+        else:
+            report += "- No comment sentiment data available\n"
         
         # Add language distribution
         report += """
-### Language Distribution
+### Language & Geographic Distribution
 """
+        # Language distribution
         languages = analysis["language_distribution"]
         if languages:
+            report += "\n#### Language Distribution\n"
             for lang, percentage in sorted(languages.items(), key=lambda x: x[1], reverse=True):
                 report += f"- **{lang}:** {percentage:.1f}%\n"
         else:
             report += "- No language data available\n"
+            
+        # Geographic reach
+        locations = analysis["geographic_reach"]
+        if locations:
+            report += "\n#### Geographic Reach\n"
+            for loc, count in sorted(locations.items(), key=lambda x: x[1], reverse=True):
+                report += f"- **{loc}:** {count} posts\n"
+        else:
+            report += "- No geographic data available\n"
         
         # Add engagement insights
         report += """
